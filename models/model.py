@@ -1,49 +1,65 @@
-# model.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import resnet50, ResNet50_Weights
+
+try:
+    import open_clip
+    OPEN_CLIP_AVAILABLE = True
+except ImportError:
+    OPEN_CLIP_AVAILABLE = False
+
 
 class StudentModel:
-    def __init__(self, device: str = "cuda"):
-        self.device = torch.device(device)
 
-        # Load a pretrained ResNet-50
-        backbone = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+    def __init__(self, device: str = "cuda", checkpoint: str = None, proj_dim: int = None):
+        if not OPEN_CLIP_AVAILABLE:
+            raise ImportError(
+                "open_clip is required. Install with: pip install open-clip-torch"
+            )
 
-        # Remove the final classification layer
-        self.backbone = nn.Sequential(*list(backbone.children())[:-1])
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
 
-        # Projection head: 2048 -> 512
-        self.embedding_layer = nn.Linear(2048, 512)
+        clip_model, _, _ = open_clip.create_model_and_transforms(
+            "ViT-B-16", pretrained="openai"
+        )
+        self._image_encoder = clip_model.visual
+        self._image_encoder.to(self.device).eval()
 
-        # Put model on device
-        self.backbone.to(self.device)
-        self.embedding_layer.to(self.device)
+        for p in self._image_encoder.parameters():
+            p.requires_grad_(False)
 
-        # Set eval mode (VERY IMPORTANT)
-        self.backbone.eval()
-        self.embedding_layer.eval()
+        self._proj = None
+        if proj_dim is not None:
+            self._proj = nn.Linear(512, proj_dim, bias=False)
+            self._proj.to(self.device).eval()
+
+        if checkpoint is not None:
+            state = torch.load(checkpoint, map_location=self.device)
+            # Checkpoint may store {"encoder": ..., "proj": ...} or a raw state_dict
+            if "encoder" in state:
+                self._image_encoder.load_state_dict(state["encoder"])
+                if "proj" in state and self._proj is not None:
+                    self._proj.load_state_dict(state["proj"])
+            else:
+                self._image_encoder.load_state_dict(state)
+
+        self._embedding_dim = proj_dim if proj_dim is not None else 512
+
+    @property
+    def embedding_dim(self) -> int:
+        return self._embedding_dim
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         """
-        images: (B, 3, H, W) already normalized with ImageNet stats
-        returns: (B, D) L2-normalized embeddings
+        Args:
+            images: (B, 3, H, W) tensor, ImageNet-normalized.
+                    The evaluator handles normalization — do NOT re-normalize here.
+        Returns:
+            (B, D) L2-normalized float32 embeddings on CPU.
         """
         images = images.to(self.device)
-
-        # CNN forward
-        features = self.backbone(images)     # (B, 2048, 1, 1)
-        features = features.view(features.size(0), -1)
-
-        embeddings = self.embedding_layer(features)
-
-        # L2 normalization (required for cosine similarity)
-        embeddings = F.normalize(embeddings, p=2, dim=1)
-
-        return embeddings.cpu()
-
-    @property
-    def embedding_dim(self) -> int:
-        return 512
+        feats = self._image_encoder(images)
+        if self._proj is not None:
+            feats = self._proj(feats)
+        return F.normalize(feats, p=2, dim=-1).cpu()

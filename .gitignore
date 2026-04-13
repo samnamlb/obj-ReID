@@ -14,3 +14,6 @@ wheels/
 
 # VS Code workspace settings (optional but recommended)
 .vscode/
+
+# Dataset images (too large for git)
+datasets/dataset_a/images/

@@ -1,0 +1,24 @@
+{
+  "student_id": "cole_vazzana",
+  "timestamp": "20260413_210611",
+  "prediction_path": "predictions/baseline_resnet50_dataset_a.csv",
+  "datasets": {
+    "dataset_a": {
+      "performance": {
+        "Rank-1": 99.9181900024414,
+        "Rank-5": 100.0,
+        "Rank-10": 100.0,
+        "Rank-20": 100.0,
+        "mAP": 86.01014925625688,
+        "mINP": 48.99083613756965,
+        "combined": 92.96416796041909
+      },
+      "submission_info": {
+        "num_queries": 7334,
+        "num_gallery": 30561,
+        "num_predicted_queries": 7334,
+        "num_missing_queries": 0
+      }
+    }
+  }
+}

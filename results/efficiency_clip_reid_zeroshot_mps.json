@@ -1,0 +1,20 @@
+{
+  "model_name": "clip_reid_zeroshot",
+  "device": "mps",
+  "dataset": "dataset_a",
+  "checkpoint": null,
+  "batch_size": 64,
+  "num_queries": 7334,
+  "num_gallery": 30561,
+  "total_images": 37895,
+  "embedding_dim": 512,
+  "parameters": 86192640,
+  "query_encode_time_sec": 102.1385890841484,
+  "gallery_encode_time_sec": 352.0854042498395,
+  "rank_time_sec": 13.000000750180334,
+  "total_eval_time_sec": 467.2239940841682,
+  "throughput_images_per_sec": 83.42800150615571,
+  "peak_memory_mb_after_query": 1526.3125,
+  "peak_memory_mb_after_gallery": 1526.3125,
+  "timestamp": "2026-04-13T23:08:11"
+}

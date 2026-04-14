@@ -1,0 +1,8 @@
+{
+  "student_id": "cole_vazzana",
+  "timestamp": "20260413_210538",
+  "prediction_path": "predictions/baseline_resnet50_dataset_a.csv",
+  "datasets": {
+    "dataset_a": {
+      "performance": {
+        "Rank-1": 

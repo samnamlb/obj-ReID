@@ -1,0 +1,20 @@
+{
+  "model_name": "resnet50_zero_shot",
+  "device": "mps",
+  "dataset": "dataset_a",
+  "checkpoint": null,
+  "batch_size": 64,
+  "num_queries": 7334,
+  "num_gallery": 30561,
+  "total_images": 37895,
+  "embedding_dim": 2048,
+  "parameters": 23508032,
+  "query_encode_time_sec": 58.962855957914144,
+  "gallery_encode_time_sec": 255.85315254097804,
+  "rank_time_sec": 12.727115207817405,
+  "total_eval_time_sec": 327.5431237067096,
+  "throughput_images_per_sec": 120.37189652677192,
+  "peak_memory_mb_after_query": 544.5625,
+  "peak_memory_mb_after_gallery": 847.9375,
+  "timestamp": "2026-04-13T22:49:34"
+}

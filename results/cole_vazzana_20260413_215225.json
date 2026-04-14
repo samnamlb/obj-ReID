@@ -1,0 +1,24 @@
+{
+  "student_id": "cole_vazzana",
+  "timestamp": "20260413_215225",
+  "prediction_path": "predictions/clip_reid_stage2_dataset_a.csv",
+  "datasets": {
+    "dataset_a": {
+      "performance": {
+        "Rank-1": 99.9181900024414,
+        "Rank-5": 100.0,
+        "Rank-10": 100.0,
+        "Rank-20": 100.0,
+        "mAP": 85.60862811916809,
+        "mINP": 51.18454603501876,
+        "combined": 92.7634073918747
+      },
+      "submission_info": {
+        "num_queries": 7334,
+        "num_gallery": 30561,
+        "num_predicted_queries": 7334,
+        "num_missing_queries": 0
+      }
+    }
+  }
+}

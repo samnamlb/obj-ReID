@@ -17,10 +17,18 @@ class StudentModel:
                 "open_clip is required. Install with: pip install open-clip-torch"
             )
 
-        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        # Fall back to CPU only when neither CUDA nor (for MPS requests) MPS is available.
+        # Previous code ignored --device mps entirely, pinning Apple Silicon runs to CPU.
+        if device == "cuda" and not torch.cuda.is_available():
+            device = "cpu"
+        elif device == "mps" and not torch.backends.mps.is_available():
+            device = "cpu"
+        self.device = torch.device(device)
 
+        # quick_gelu=True matches how OpenAI trained the ViT-B/16 CLIP weights.
+        # Without it open_clip silently substitutes standard GELU, degrading embedding quality.
         clip_model, _, _ = open_clip.create_model_and_transforms(
-            "ViT-B-16", pretrained="openai"
+            "ViT-B-16", pretrained="openai", force_quick_gelu=True
         )
         self._image_encoder = clip_model.visual
         self._image_encoder.to(self.device).eval()

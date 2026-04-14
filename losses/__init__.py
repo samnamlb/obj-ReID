@@ -34,8 +34,12 @@ class ContrastiveLoss(nn.Module):
         Returns:
             Scalar loss.
         """
+        # CLIP convention: logits = similarity / temperature (lower tau → sharper).
+        # Previously this code *multiplied* by temp, making tau=0.07 softer (not sharper),
+        # which left the contrastive gradient ~200x too small and stalled prompt-token
+        # learning at the log(B) random-guess floor.
         temp = self.log_temp.exp()
-        logits = image_features @ text_features.T * temp     # (B, B)
+        logits = (image_features @ text_features.T) / temp    # (B, B)
         labels = torch.arange(logits.shape[0], device=logits.device)
 
         loss_i2t = F.cross_entropy(logits, labels)
@@ -89,10 +93,16 @@ class TripletLossHardMining(nn.Module):
         """
         Compute (B, B) Euclidean distance matrix.
         Uses: ||a - b||^2 = ||a||^2 + ||b||^2 - 2<a, b>
+
+        Note on the epsilon: d/dx sqrt(x) is infinite at x=0, so naive
+        .clamp(min=0).sqrt() produces NaN gradients whenever two embeddings
+        in a batch are identical — which happens routinely when the PK
+        sampler oversamples with replacement (identity has < K images).
+        Clamping to a tiny positive floor keeps the gradient finite.
         """
         sq = embeddings.pow(2).sum(dim=1, keepdim=True)       # (B, 1)
         dist_sq = sq + sq.T - 2.0 * (embeddings @ embeddings.T)
-        return dist_sq.clamp(min=0.0).sqrt()
+        return dist_sq.clamp(min=1e-12).sqrt()
 
     def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """

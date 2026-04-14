@@ -163,8 +163,10 @@ class CLIPReIDModel(nn.Module):
     ):
         super().__init__()
 
+        # quick_gelu=True matches how OpenAI trained the ViT-B/16 CLIP weights.
+        # Without it open_clip silently substitutes standard GELU, degrading embedding quality.
         clip_model, _, _ = open_clip.create_model_and_transforms(
-            "ViT-B-16", pretrained="openai"
+            "ViT-B-16", pretrained="openai", force_quick_gelu=True
         )
 
         self.image_encoder = clip_model.visual    # input (B,3,H,W) → (B,512)

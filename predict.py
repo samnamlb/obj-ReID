@@ -157,9 +157,16 @@ def main():
     parser.add_argument("--device",        type=str, default="cuda")
     args = parser.parse_args()
 
-    device = args.device if torch.cuda.is_available() else "cpu"
+    # Respect --device mps on Apple Silicon; only fall back to CPU when the
+    # requested backend is actually unavailable.
+    if args.device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+    elif args.device == "mps" and not torch.backends.mps.is_available():
+        device = "cpu"
+    else:
+        device = args.device
     if device != args.device:
-        print(f"[INFO] CUDA not available — falling back to CPU")
+        print(f"[INFO] {args.device} not available — falling back to CPU")
 
     # ── Load model ──────────────────────────────────────────────────────────
     ckpt_label = args.checkpoint or "none (zero-shot pretrained CLIP)"

@@ -85,7 +85,12 @@ def compute_cmc_map(
         pos_idx = np.where(matches == 1)[0]
         if len(pos_idx) > 0:
             max_pos_idx = np.max(pos_idx)
-            inp = cmc[max_pos_idx] / (max_pos_idx + 1.0)
+            # Standard mINP (Ye et al., 2021): |G_q| / R^hard_q, where |G_q| is
+            # the number of positives for this query and R^hard_q is the rank
+            # of the hardest (last) correct match. Previously this used the
+            # capped `cmc` array (numerator maxed out at 1), which undercounted
+            # mINP by a factor of num_positives for every multi-positive query.
+            inp = tmp_cmc[max_pos_idx] / (max_pos_idx + 1.0)
             all_INP.append(inp)
 
     if num_valid_query == 0:
@@ -187,19 +192,20 @@ def evaluate_dataset(
         max_rank=max_rank, exclude_same_camera=exclude_same_camera,
     )
 
+    # Cast to Python float so json.dump can serialize (numpy float32 is not JSON-serializable)
     rank_metrics = {}
     for k in k_values:
         if k <= len(cmc):
-            rank_metrics[f"Rank-{k}"] = cmc[k - 1] * 100
+            rank_metrics[f"Rank-{k}"] = float(cmc[k - 1] * 100)
         else:
-            rank_metrics[f"Rank-{k}"] = cmc[-1] * 100 if len(cmc) > 0 else 0.0
+            rank_metrics[f"Rank-{k}"] = float(cmc[-1] * 100) if len(cmc) > 0 else 0.0
 
     results = {
         "performance": {
             **rank_metrics,
-            "mAP": mAP * 100,
-            "mINP": mINP * 100,
-            "combined": (mAP + cmc[0]) / 2 * 100,
+            "mAP": float(mAP * 100),
+            "mINP": float(mINP * 100),
+            "combined": float((mAP + cmc[0]) / 2 * 100),
         },
         "submission_info": {
             "num_queries": n_q,

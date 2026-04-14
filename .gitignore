@@ -15,5 +15,20 @@ wheels/
 # VS Code workspace settings (optional but recommended)
 .vscode/
 
-# Dataset images (too large for git)
+# Dataset images (too large for git) — both directory and symlink forms
 datasets/dataset_a/images/
+datasets/dataset_a/images
+datasets/dataset_b/images/
+datasets/dataset_b/images
+
+# Trained checkpoints — too large; each teammate trains their own
+checkpoints/
+
+# Prediction CSVs — generated per run; teammate regenerates via predict.py
+predictions/
+
+# pytest cache
+.pytest_cache/
+
+# macOS metadata
+.DS_Store

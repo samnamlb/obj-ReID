@@ -13,6 +13,12 @@
 #       --dataset_root ./datasets \
 #       --epochs 60 \
 #       --category animal
+#
+#Alt Usage:
+#  python .\train_stage1.py
+#   --dataset_root .\datasets\dataset_a
+#  --parquet_path .\datasets\dataset_a\train.parquet
+#  --epochs 60 --category animal
 
 import argparse
 import os

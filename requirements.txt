@@ -1,0 +1,12 @@
+torch
+torchvision
+timm
+open-clip-torch
+pandas
+pyarrow
+scikit-learn
+scipy
+tqdm
+pillow
+huggingface-hub
+pyyaml

@@ -1,0 +1,20 @@
+{
+  "model_name": "clip_reid_finetuned",
+  "device": "cuda",
+  "dataset": "dataset_a",
+  "checkpoint": "checkpoints/stage2_last.pt",
+  "batch_size": 64,
+  "num_queries": 130,
+  "num_gallery": 296,
+  "total_images": 426,
+  "embedding_dim": 512,
+  "parameters": 86192640,
+  "query_encode_time_sec": 1.5869212140005402,
+  "gallery_encode_time_sec": 2.2360961079994013,
+  "rank_time_sec": 0.0017103680002037436,
+  "total_eval_time_sec": 3.8247276900001452,
+  "throughput_images_per_sec": 111.43030860690578,
+  "peak_memory_mb_after_query": 967.052734375,
+  "peak_memory_mb_after_gallery": 967.173828125,
+  "timestamp": "2026-04-17T01:13:29"
+}

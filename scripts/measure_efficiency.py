@@ -1,41 +1,20 @@
 #!/usr/bin/env python3
-"""
-Measure the efficiency metrics the project is graded on (30% of grade):
-  - throughput (images encoded per second)
-  - peak memory (whatever the backend can report)
-  - embedding dim
-  - total evaluation time (encode + rank)
-  - model parameter count
+"""Measure image encoding throughput, full-gallery ranking time and peak memory.
 
-Covers both the ResNet50 baseline and the CLIP-ReID StudentModel so we can
-compare apples-to-apples. Writes a JSON to results/ so the report can cite
-real numbers.
-
-Usage:
-    # ResNet50 baseline
-    python scripts/measure_efficiency.py \
-        --model resnet \
-        --dataset_root datasets/dataset_a \
-        --dataset_name dataset_a \
-        --device mps
-
-    # CLIP-ReID zero-shot (no checkpoint)
-    python scripts/measure_efficiency.py \
-        --model clip --device mps
-
-    # CLIP-ReID with a trained Stage 2 checkpoint
-    !python scripts/measure_efficiency.py \
-    --model clip \
-    --dataset_root datasets/test \
-    --dataset_name dataset_a \
-    --checkpoint checkpoints/stage2_last.pt \
-    --device cuda
+Real-data comparisons use the same shared split and transforms as prediction.
+Use --synthetic for an offline random-weight pipeline check, never accuracy claims.
+See README.md for timing scopes, memory definitions and comparison commands.
 """
 import argparse
 import gc
 import json
 import os
-import resource
+import platform
+import statistics
+try:
+    import resource
+except ImportError:
+    resource = None
 import sys
 import time
 from datetime import datetime
@@ -82,23 +61,7 @@ class _InferenceDataset(Dataset):
         return self.transform(img), idx
 
 
-def _load_paths(dataset_root: str, dataset_name: str):
-    """Same query/gallery split logic as predict.py / resnet_baseline.py."""
-    df = pd.read_parquet(os.path.join(dataset_root, "test.parquet"))
-    if dataset_name == "dataset_a":
-        q, g = [], []
-        for _, group in df.groupby("identity"):
-            paths = group["image_path"].tolist()
-            if len(paths) >= 2:
-                q.extend(paths[:2])
-                g.extend(paths[2:])
-            else:
-                g.extend(paths)
-        g.extend(q)
-    else:
-        q = df[df["split"] == "query"]["image_path"].tolist()
-        g = df[df["split"] == "gallery"]["image_path"].tolist()
-    return q, g
+from reid_data import load_paths as _load_paths, validate_images
 
 
 # ---------------------------------------------------------------------------
@@ -109,10 +72,12 @@ class _ResNetAdapter(nn.Module):
     name = "resnet50_zero_shot"
     embedding_dim = 2048  # resnet50 with fc=Identity outputs 2048-d
 
-    def __init__(self, device):
+    def __init__(self, device, random_weights=False):
         super().__init__()
         self.device = device
-        self.backbone = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+        if random_weights:
+            self.name = "resnet50_random_init"
+        self.backbone = models.resnet50(weights=None if random_weights else models.ResNet50_Weights.IMAGENET1K_V2)
         self.backbone.fc = nn.Identity()
         self.to(device).eval()
 
@@ -122,21 +87,21 @@ class _ResNetAdapter(nn.Module):
 
 
 class _CLIPAdapter(nn.Module):
-    def __init__(self, device, checkpoint=None, proj_dim=None):
+    def __init__(self, device, checkpoint=None, proj_dim=None, random_weights=False):
         super().__init__()
         # Import here so CPU-only environments that don't need CLIP don't pay.
         from models.model import StudentModel
         self._student = StudentModel(
-            device=str(device), checkpoint=checkpoint, proj_dim=proj_dim
+            device=str(device), checkpoint=checkpoint, proj_dim=proj_dim,
+            pretrained=None if random_weights else "openai"
         )
-        self.name = "clip_reid" + ("_finetuned" if checkpoint else "_zeroshot")
+        self.name = "clip_reid_random_init" if random_weights else "clip_reid" + ("_finetuned" if checkpoint else "_zeroshot")
         self.embedding_dim = self._student.embedding_dim
 
     @torch.inference_mode()
     def encode(self, images):
-        # StudentModel.encode() handles device transfer and returns CPU tensors.
-        # To keep ranking on-device, move it back to the requested device.
-        return self._student.encode(images).to(self._student.device)
+        # Keep features on-device until the shared timing loop copies once to CPU.
+        return self._student.encode(images, return_cpu=False)
 
 
 def _count_parameters(module) -> int:
@@ -175,6 +140,20 @@ def _peak_memory_mb(device: torch.device) -> float:
         return torch.cuda.max_memory_allocated(device) / (1024 ** 2)
     # For MPS / CPU, fall back to peak process RSS via getrusage.
     # On macOS ru_maxrss is in bytes; on Linux it's in KB. We detect.
+    if resource is None:
+        import ctypes
+        from ctypes import wintypes
+        class Counters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [(name, ctypes.c_size_t) for name in ["PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage"]]
+        counters = Counters()
+        counters.cb = ctypes.sizeof(counters)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+        if not psapi.GetProcessMemoryInfo(kernel.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return counters.PeakWorkingSetSize / (1024 ** 2)
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform == "darwin":
         return usage / (1024 ** 2)   # bytes -> MB
@@ -188,7 +167,7 @@ def _peak_memory_mb(device: torch.device) -> float:
 
 def _sync(device):
     if device.type == "cuda":
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device)
     elif device.type == "mps":
         torch.mps.synchronize()
 
@@ -245,12 +224,27 @@ def main():
     p.add_argument("--checkpoint", type=str, default=None,
                    help="Stage 2 checkpoint (clip model only)")
     p.add_argument("--proj_dim", type=int, default=None)
-    p.add_argument("--device", type=str, default="mps",
+    p.add_argument("--device", type=str, default="cpu",
                    choices=["cuda", "mps", "cpu"])
     p.add_argument("--batch_size", type=int, default=64)
-    p.add_argument("--num_workers", type=int, default=4)
+    p.add_argument("--num_workers", type=int, default=0)
     p.add_argument("--output_dir", type=str, default="results")
+    p.add_argument("--synthetic", action="store_true", help="Random tensors and random weights; pipeline check only")
+    p.add_argument("--synthetic_queries", type=int, default=4)
+    p.add_argument("--synthetic_gallery", type=int, default=8)
+    p.add_argument("--repeats", type=int, default=3)
+    p.add_argument("--cpu_threads", type=int, default=4)
+    p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
+    if min(args.batch_size, args.repeats, args.synthetic_queries, args.synthetic_gallery, args.cpu_threads) < 1 or args.num_workers < 0:
+        p.error("batch size, repeats and synthetic sizes must be positive; workers nonnegative")
+    if args.model == "resnet" and (args.checkpoint or args.proj_dim):
+        p.error("checkpoint and proj_dim are supported only for clip")
+    if args.synthetic and (args.checkpoint or args.proj_dim):
+        p.error("synthetic uses random weights without checkpoint or projection")
+    from runtime import seed_everything
+    seed_everything(args.seed)
+    torch.set_num_threads(args.cpu_threads)
 
     # Resolve device, same policy as StudentModel.
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -259,16 +253,27 @@ def main():
         args.device = "cpu"
     device = torch.device(args.device)
 
+    if not args.synthetic:
+        q_paths, g_paths = _load_paths(args.dataset_root, args.dataset_name)
+        validate_images(args.dataset_root, q_paths + g_paths)
+
     # Build model
     if args.model == "resnet":
-        model = _ResNetAdapter(device)
+        model = _ResNetAdapter(device, random_weights=args.synthetic)
     else:
-        model = _CLIPAdapter(device, checkpoint=args.checkpoint, proj_dim=args.proj_dim)
+        model = _CLIPAdapter(device, checkpoint=args.checkpoint, proj_dim=args.proj_dim, random_weights=args.synthetic)
 
     param_count = _count_parameters(model)
 
     # Build datasets
-    q_paths, g_paths = _load_paths(args.dataset_root, args.dataset_name)
+    if args.synthetic:
+        from torch.utils.data import TensorDataset
+        q_paths, g_paths = list(range(args.synthetic_queries)), list(range(args.synthetic_gallery))
+        q_dataset = TensorDataset(torch.randn(len(q_paths), 3, 224, 224), torch.arange(len(q_paths)))
+        g_dataset = TensorDataset(torch.randn(len(g_paths), 3, 224, 224), torch.arange(len(g_paths)))
+    else:
+        q_dataset = _InferenceDataset(args.dataset_root, q_paths)
+        g_dataset = _InferenceDataset(args.dataset_root, g_paths)
 
     print(f"Model       : {model.name}")
     print(f"Device      : {device}")
@@ -279,27 +284,24 @@ def main():
     print(f"Parameters  : {param_count:,}")
     print()
 
-    # Encode query + gallery (timed + memory tracked)
-    print("Timing query encoding...")
-    q_emb, q_time = _time_encode(
-        model, _InferenceDataset(args.dataset_root, q_paths),
-        args.batch_size, args.num_workers, device,
-    )
-    peak_after_query = _peak_memory_mb(device)
-
-    print("Timing gallery encoding...")
-    g_emb, g_time = _time_encode(
-        model, _InferenceDataset(args.dataset_root, g_paths),
-        args.batch_size, args.num_workers, device,
-    )
-    peak_after_gallery = _peak_memory_mb(device)
+    query_times, gallery_times, peaks = [], [], []
+    for repeat in range(args.repeats):
+        print(f"Timing repeat {repeat + 1}/{args.repeats}...")
+        q_emb, q_time = _time_encode(model, q_dataset, args.batch_size, args.num_workers, device)
+        peaks.append(_peak_memory_mb(device))
+        g_emb, g_time = _time_encode(model, g_dataset, args.batch_size, args.num_workers, device)
+        peaks.append(_peak_memory_mb(device))
+        query_times.append(q_time)
+        gallery_times.append(g_time)
+    q_time, g_time = statistics.median(query_times), statistics.median(gallery_times)
+    peak_after_query, peak_after_gallery = max(peaks[::2]), max(peaks[1::2])
 
     # Ranking (matmul + argsort). Time it separately — this is part of
     # "total evaluation time" per the proposal.
     print("Timing ranking...")
     rank_start = time.perf_counter()
     sim = q_emb @ g_emb.T
-    rankings = np.argsort(-sim, axis=1)[:, :50]
+    rankings = np.argsort(-sim, axis=1)
     rank_time = time.perf_counter() - rank_start
 
     total_images = len(q_paths) + len(g_paths)
@@ -309,8 +311,27 @@ def main():
 
     results = {
         "model_name": model.name,
+        "synthetic": args.synthetic,
+        "weights": "random" if args.synthetic else "checkpoint" if args.checkpoint else "pretrained",
+        "seed": args.seed,
+        "repeats": args.repeats,
+        "query_times_sec": query_times,
+        "gallery_times_sec": gallery_times,
+        "python_version": platform.python_version(),
+        "torch_version": str(torch.__version__),
+        "platform": platform.platform(),
+        "processor": platform.processor(),
+        "cuda_version": torch.version.cuda,
+        "device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else str(device),
+        "memory_metric": "cuda_peak_allocated_MiB" if device.type == "cuda" else "process_lifetime_peak_RSS_MiB",
+        "timing_scope": "median encoding passes including image loading, preprocessing and CPU embedding copy; CPU full-gallery ranking; excludes model load and warmup",
+        "num_workers": args.num_workers,
+        "cpu_threads": torch.get_num_threads(),
+        "amortized_encode_ms_per_image": 1000 * total_encode_time / total_images,
+        "embedding_bytes_per_image": int(q_emb.shape[1] * q_emb.dtype.itemsize),
+        "similarity_matrix_bytes": int(sim.nbytes),
         "device": str(device),
-        "dataset": args.dataset_name,
+        "dataset": "synthetic" if args.synthetic else args.dataset_name,
         "checkpoint": args.checkpoint,
         "batch_size": args.batch_size,
         "num_queries": len(q_paths),
@@ -338,13 +359,13 @@ def main():
           f"(query {q_time:.2f} + gallery {g_time:.2f})")
     print(f"Rank time        : {rank_time:6.3f} sec")
     print(f"Total eval time  : {total_eval_time:6.2f} sec")
-    print(f"Peak memory      : {peak_after_gallery:,.1f} MB  (RSS-based on MPS/CPU)")
+    print(f"Peak memory      : {max(peak_after_query, peak_after_gallery):,.1f} MiB  (process lifetime RSS on MPS/CPU)")
     print(f"Embedding dim    : {model.embedding_dim}")
     print(f"Parameters       : {param_count:,}")
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"efficiency_{model.name}_{device.type}.json"
+    out_path = out_dir / f"efficiency_{model.name}_{device.type}{'_synthetic' if args.synthetic else ''}.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved: {out_path}")

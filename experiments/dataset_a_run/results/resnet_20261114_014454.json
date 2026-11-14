@@ -1,0 +1,24 @@
+{
+  "student_id": "resnet",
+  "timestamp": "20261114_014454",
+  "prediction_path": "/content/drive/MyDrive/ObjReID_Run/runs/20261114_004748/predictions/resnet.csv",
+  "datasets": {
+    "dataset_a": {
+      "performance": {
+        "Rank-1": 63.0,
+        "Rank-5": 84.0,
+        "Rank-10": 90.5,
+        "Rank-20": 98.0,
+        "mAP": 58.06779316205418,
+        "mINP": 43.653785391560156,
+        "combined": 60.53389658102709
+      },
+      "submission_info": {
+        "num_queries": 200,
+        "num_gallery": 529,
+        "num_predicted_queries": 200,
+        "num_missing_queries": 0
+      }
+    }
+  }
+}

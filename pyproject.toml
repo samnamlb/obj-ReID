@@ -1,9 +1,9 @@
 [project]
 name = "obj-reid-project"
 version = "0.1.0"
-description = "Add your description here"
+description = "Two-stage CLIP object re-identification and reproducible inference efficiency evaluation"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "torch>=2.2.0",
     "torchvision>=0.17.0",
@@ -15,9 +15,23 @@ dependencies = [
     "tqdm>=4.66.0",
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
+    "pillow>=10.0.0",
+    "numpy>=1.26.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["models", "losses", "datasets"]
+py-modules = ["runtime", "reid_data"]

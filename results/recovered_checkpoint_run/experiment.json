@@ -1,0 +1,14 @@
+{
+  "seed": 42,
+  "train_identities": 800,
+  "val_identities": 100,
+  "test_identities": 100,
+  "max_images_per_identity": 8,
+  "stage1_epochs": 10,
+  "stage2_epochs": 5,
+  "stage1_batch_size": 16,
+  "P": 4,
+  "K": 4,
+  "split_kind": "new identity-disjoint subset, not original course split",
+  "source_inventory": "train/val from supplied training identities; test from supplied test identities absent from all supplied training metadata"
+}

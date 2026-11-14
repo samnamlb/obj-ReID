@@ -1,0 +1,18 @@
+{
+  "archive": "/content/obj_reid_20261114_004748/images.tar.gz",
+  "dataset_root": "/content/obj_reid_20261114_004748/datasets/dataset_a",
+  "train_rows": 24532,
+  "test_rows": 30561,
+  "train_identities": 6712,
+  "test_identities": 8391,
+  "overlapping_train_test_paths": 24532,
+  "overlapping_train_test_identities": 6712,
+  "referenced_unique_images": 30561,
+  "archive_matched_images": 30561,
+  "extracted_images": 30561,
+  "existing_images": 0,
+  "referenced_image_bytes": 5704370029,
+  "missing_image_count": 0,
+  "missing_image_examples": [],
+  "warning": "Original split preserved. Overlapping training/test images cannot support independent held-out accuracy claims. Checkpoints do not record the original training image paths."
+}

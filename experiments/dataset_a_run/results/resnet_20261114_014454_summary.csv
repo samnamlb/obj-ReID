@@ -1,0 +1,2 @@
+dataset,Rank-1,Rank-5,Rank-10,Rank-20,mAP,mINP,combined
+dataset_a,63.00,84.00,90.50,98.00,58.07,43.65,60.53

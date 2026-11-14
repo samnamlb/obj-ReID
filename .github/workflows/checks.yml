@@ -1,0 +1,27 @@
+name: Offline pipeline checks
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: windows-latest
+            python: '3.13'
+          - os: macos-latest
+            python: '3.13'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install uv
+      - run: python -m uv sync --locked --python ${{ matrix.python }}
+      - run: python -m uv run --locked python -m pytest -q
+      - run: python -m uv run --locked python scripts/verify_experiment.py
+      - run: python -m uv run --locked python scripts/smoke_test.py

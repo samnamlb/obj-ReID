@@ -28,10 +28,12 @@ from tqdm import tqdm
 from models.clip_reid_model import CLIPReIDModel
 from losses import ContrastiveLoss
 from datasets.loader import get_train_loader
+from runtime import seed_everything, resolve_device
 
 
 def train_stage1(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    seed_everything(args.seed)
+    device = resolve_device(args.device)
     print(f"Device: {device}")
 
     loader, num_identities = get_train_loader(
@@ -42,16 +44,12 @@ def train_stage1(args):
         debug=args.debug,
         debug_samples=args.debug_samples,
         parquet_path=args.parquet_path,
+        num_workers=args.num_workers,
     )
     print(f"Loaded dataset: {num_identities} identities")
 
     if args.num_identities is not None and args.num_identities != num_identities:
-        print(
-            f"[WARNING] --num_identities={args.num_identities} overrides "
-            f"the detected count of {num_identities}. "
-            f"This will cause index errors if raw identity values exceed the override."
-        )
-        num_identities = args.num_identities
+        raise ValueError("num_identities must match the metadata identity count")
 
     model = CLIPReIDModel(
         num_identities=num_identities,
@@ -80,6 +78,8 @@ def train_stage1(args):
 
     for epoch in range(1, args.epochs + 1):
         model.train()
+        model.image_encoder.eval()
+        model.text_encoder.eval()
         criterion.train()
 
         epoch_loss = 0.0
@@ -91,7 +91,7 @@ def train_stage1(args):
             identity_indices = identity_indices.to(device)
 
             image_features, text_features = model(images, identity_indices, stage=1)
-            loss = criterion(image_features, text_features)
+            loss = criterion(image_features, text_features, identity_indices)
 
             optimizer.zero_grad()
             loss.backward()
@@ -119,6 +119,8 @@ def train_stage1(args):
             "num_identities": num_identities,
             "category": args.category,
             "temperature": criterion.log_temp.exp().item(),
+            "identities": loader.dataset.identities,
+            "seed": args.seed,
         },
         save_path,
     )
@@ -147,7 +149,12 @@ def parse_args():
     p.add_argument("--debug", action="store_true")
     p.add_argument("--debug_samples", type=int, default=200)
 
+    p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--num_workers", type=int, default=0)
     args = p.parse_args()
+    if args.epochs < 1:
+        p.error("epochs must be positive")
     if args.debug:
         args.epochs = 2
         print(f"[DEBUG] Limiting to {args.debug_samples} samples, 2 epochs.")

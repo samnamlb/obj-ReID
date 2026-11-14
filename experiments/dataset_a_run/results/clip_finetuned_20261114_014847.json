@@ -1,0 +1,24 @@
+{
+  "student_id": "clip_finetuned",
+  "timestamp": "20261114_014847",
+  "prediction_path": "/content/drive/MyDrive/ObjReID_Run/runs/20261114_004748/predictions/clip_finetuned.csv",
+  "datasets": {
+    "dataset_a": {
+      "performance": {
+        "Rank-1": 73.5,
+        "Rank-5": 89.5,
+        "Rank-10": 97.5,
+        "Rank-20": 99.0,
+        "mAP": 69.78991091678407,
+        "mINP": 57.75155697010952,
+        "combined": 71.64495545839203
+      },
+      "submission_info": {
+        "num_queries": 200,
+        "num_gallery": 529,
+        "num_predicted_queries": 200,
+        "num_missing_queries": 0
+      }
+    }
+  }
+}

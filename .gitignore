@@ -24,3 +24,18 @@ checkpoints/
 .DS_Store
 
 
+
+# Local data and generated validation reports
+datasets/dataset_a/
+datasets/dataset_b/
+*.pt
+results/smoke_test.json
+results/*_synthetic.json
+images.tar.gz
+results/dataset_a_recovery.json
+results/checkpoint_recovery.json
+output/colab/*.zip
+
+# Local source/result bundles and generated runtime data
+*.zip
+/runs/

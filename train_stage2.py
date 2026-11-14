@@ -6,7 +6,6 @@
 # Text encoder and prompt tokens are frozen. Text features are pre-computed once.
 #
 # Outputs:
-#   checkpoints/stage2_best.pt
 #   checkpoints/stage2_last.pt
 #
 # Usage:
@@ -29,6 +28,7 @@ from tqdm import tqdm
 from models.clip_reid_model import CLIPReIDModel
 from losses import StageTwoLoss
 from datasets.loader import get_train_loader
+from runtime import seed_everything, resolve_device
 
 
 def get_warmup_cosine_scheduler(optimizer, warmup_epochs, total_epochs):
@@ -53,7 +53,8 @@ def save_checkpoint(model, path, metadata=None):
 
 
 def train_stage2(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    seed_everything(args.seed)
+    device = resolve_device(args.device)
     print(f"Device: {device}")
 
     # DataLoader — PK sampler required for triplet loss
@@ -66,12 +67,12 @@ def train_stage2(args):
         debug=args.debug,
         debug_samples=args.debug_samples,
         parquet_path=args.parquet_path,
+        num_workers=args.num_workers,
     )
     print(f"Loaded dataset: {num_identities} identities, batch={args.P * args.K}")
 
     if args.num_identities is not None and args.num_identities != num_identities:
-        print(f"[WARNING] --num_identities override: {args.num_identities} (detected: {num_identities})")
-        num_identities = args.num_identities
+        raise ValueError("num_identities must match the metadata identity count")
 
     model = CLIPReIDModel(
         num_identities=num_identities,
@@ -80,7 +81,11 @@ def train_stage2(args):
         proj_dim=args.proj_dim,
     ).to(device)
 
-    stage1_ckpt = torch.load(args.stage1_checkpoint, map_location=device)
+    stage1_ckpt = torch.load(args.stage1_checkpoint, map_location=device, weights_only=True)
+    if stage1_ckpt.get("identities", loader.dataset.identities) != loader.dataset.identities:
+        raise ValueError("Stage 1 identity mapping differs from the current training data")
+    if stage1_ckpt.get("category", args.category) != args.category or stage1_ckpt.get("num_tokens", args.num_tokens) != args.num_tokens:
+        raise ValueError("Stage 1 category and num_tokens must match Stage 2")
     ckpt_num_ids = stage1_ckpt.get("num_identities", None)
     if ckpt_num_ids is not None and ckpt_num_ids != num_identities:
         raise ValueError(
@@ -140,6 +145,7 @@ def train_stage2(args):
 
     for epoch in range(1, args.epochs + 1):
         model.train()
+        model.text_encoder.eval()
 
         totals = {"id": 0.0, "tri": 0.0, "i2t": 0.0, "total": 0.0}
         n_batches = 0
@@ -156,13 +162,14 @@ def train_stage2(args):
             images = images.to(device)
             identity_indices = identity_indices.to(device)
 
-            image_features, logits = model(images, identity_indices, stage=2)
+            image_features, logits, alignment_features = model(images, identity_indices, stage=2)
 
             loss, components = criterion(
                 image_features=image_features,
                 logits=logits,
                 all_text_features=all_text_features,
                 labels=identity_indices,
+                alignment_features=alignment_features,
             )
 
             optimizer.zero_grad()
@@ -200,7 +207,7 @@ def train_stage2(args):
             print(f"  Saved: {ckpt_path}")
 
     last_path = os.path.join(args.checkpoint_dir, "stage2_last.pt")
-    save_checkpoint(model, last_path, metadata={"epoch": args.epochs})
+    save_checkpoint(model, last_path, metadata={"epoch": args.epochs, "seed": args.seed, "identities": loader.dataset.identities, "proj_dim": args.proj_dim})
     print(f"\nStage 2 complete. Final checkpoint: {last_path}")
     print(
         "To load at inference:\n"
@@ -240,7 +247,12 @@ def parse_args():
     p.add_argument("--debug", action="store_true")
     p.add_argument("--debug_samples", type=int, default=200)
 
+    p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--num_workers", type=int, default=0)
     args = p.parse_args()
+    if args.epochs < 1:
+        p.error("epochs must be positive")
     if args.debug:
         args.epochs = 2
         print(f"[DEBUG] Limiting to {args.debug_samples} samples, 2 epochs.")

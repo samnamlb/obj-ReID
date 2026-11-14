@@ -160,13 +160,14 @@ class CLIPReIDModel(nn.Module):
         num_tokens: int = 4,
         category: str = "animal",
         proj_dim: int = None,
+        pretrained="openai",
     ):
         super().__init__()
 
         # quick_gelu=True matches how OpenAI trained the ViT-B/16 CLIP weights.
         # Without it open_clip silently substitutes standard GELU, degrading embedding quality.
         clip_model, _, _ = open_clip.create_model_and_transforms(
-            "ViT-B-16", pretrained="openai", force_quick_gelu=True
+            "ViT-B-16", pretrained=pretrained, force_quick_gelu=True
         )
 
         self.image_encoder = clip_model.visual    # input (B,3,H,W) → (B,512)
@@ -261,15 +262,18 @@ class CLIPReIDModel(nn.Module):
         Stage 1 returns: (image_features, text_features)
             both (B, 512) L2-normalized — used for contrastive loss
 
-        Stage 2 returns: (image_features, logits)
+        Stage 2 returns: (image_features, logits, alignment_features)
             image_features (B, embed_dim) L2-normalized
             logits         (B, num_identities) raw classifier scores
+            alignment_features (B, 512) normalized native image features
         """
-        image_features = self.encode_image(images)          # (B, D), normalized
+        raw_features = self.image_encoder(images)
+        image_features = F.normalize(self.proj(raw_features) if self.proj is not None else raw_features, p=2, dim=-1)
 
         if stage == 1:
             text_features = self.text_encoder(identity_indices)  # (B, 512), normalized
             return image_features, text_features
         else:
             logits = self.classifier(image_features)             # (B, num_ids)
-            return image_features, logits
+            alignment_features = F.normalize(raw_features, p=2, dim=-1)
+            return image_features, logits, alignment_features

@@ -41,20 +41,6 @@ IMAGENET_STD  = [0.229, 0.224, 0.225]
 
 
 
-def filter_existing_paths(dataset_root, paths):
-    kept = []
-    missing = 0
-    for p in paths:
-        full = os.path.join(dataset_root, p)
-        if os.path.exists(full):
-            kept.append(p)
-        else:
-            missing += 1
-    if missing > 0:
-        print(f"[WARN] Skipped {missing} missing images.")
-    return kept
-
-
 # ---------------------------------------------------------------------------
 # Inference dataset
 # ---------------------------------------------------------------------------
@@ -112,30 +98,7 @@ def encode_images(
     return embeddings[np.argsort(order)]   # restore sequential order
 
 
-def load_query_gallery(dataset_root: str, dataset_name: str):
-    """
-    Return (query_paths, gallery_paths) exactly matching evaluate.py's split logic
-    so that query indices align with evaluation expectations.
-    """
-    df = pd.read_parquet(os.path.join(dataset_root, "test.parquet"))
-
-    if dataset_name == "dataset_a":
-        query_paths, gallery_paths = [], []
-        for pid, group in df.groupby("identity"):
-            paths = group["image_path"].values.tolist()
-            if len(paths) >= 2:
-                query_paths.extend(paths[:2])
-                gallery_paths.extend(paths[2:])
-            else:
-                gallery_paths.extend(paths)
-        gallery_paths.extend(query_paths)   # standard ReID: query images also in gallery
-    else:   # dataset_b
-        query_df   = df[df["split"] == "query"]
-        gallery_df = df[df["split"] == "gallery"]
-        query_paths   = query_df["image_path"].tolist()
-        gallery_paths = gallery_df["image_path"].tolist()
-
-    return query_paths, gallery_paths
+from reid_data import load_paths as load_query_gallery, validate_images
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +125,8 @@ def main():
                         help="Projection head output dim, if used during training. "
                              "Must match --proj_dim passed to train_stage2.py.")
 
-    parser.add_argument("--top_k",         type=int, default=50,
-                        help="Number of gallery items to rank per query (default 50).")
+    parser.add_argument("--top_k",         type=int, default=0,
+                        help="Number of ranked gallery items; 0 means full gallery for exact mAP/mINP.")
     parser.add_argument("--batch_size",    type=int, default=128)
     parser.add_argument("--image_size",    type=int, default=224)
     parser.add_argument("--num_workers",   type=int, default=4)
@@ -181,7 +144,14 @@ def main():
     if device != args.device:
         print(f"[INFO] {args.device} not available — falling back to CPU")
 
+    if args.top_k < 0 or args.batch_size < 1 or args.num_workers < 0:
+        parser.error("top_k and num_workers must be nonnegative; batch_size must be positive")
+
     # ── Load model ──────────────────────────────────────────────────────────
+    query_paths, gallery_paths = load_query_gallery(args.dataset_root, args.dataset_name)
+
+    validate_images(args.dataset_root, query_paths + gallery_paths)
+
     ckpt_label = args.checkpoint or "none (zero-shot pretrained CLIP)"
     print(f"Loading StudentModel  checkpoint={ckpt_label}")
     model = StudentModel(
@@ -193,10 +163,6 @@ def main():
 
     # ── Load paths ──────────────────────────────────────────────────────────
 
-    query_paths, gallery_paths = load_query_gallery(args.dataset_root, args.dataset_name)
-
-    query_paths   = filter_existing_paths(args.dataset_root, query_paths)
-    gallery_paths = filter_existing_paths(args.dataset_root, gallery_paths)
 
     print(f"Queries : {len(query_paths)}")
     print(f"Gallery : {len(gallery_paths)}")
@@ -225,7 +191,7 @@ def main():
     print("Computing rankings...")
     # query_emb and gallery_emb are already L2-normalized → dot product = cosine similarity
     similarity = query_emb @ gallery_emb.T                      # (n_query, n_gallery)
-    top_k = min(args.top_k, similarity.shape[1])
+    top_k = similarity.shape[1] if args.top_k == 0 else min(args.top_k, similarity.shape[1])
     rankings = np.argsort(-similarity, axis=1)[:, :top_k]       # descending
 
     # ── Save ────────────────────────────────────────────────────────────────

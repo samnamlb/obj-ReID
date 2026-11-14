@@ -1,0 +1,57 @@
+{
+  "status": "passed",
+  "scope": "Saved predictions independently reevaluated locally; GPU timings checked arithmetically, not rerun",
+  "image_existence_checked": true,
+  "partitions": {
+    "train": {
+      "images": 4376,
+      "identities": 800
+    },
+    "val": {
+      "images": 514,
+      "identities": 100
+    },
+    "test": {
+      "images": 529,
+      "identities": 100
+    }
+  },
+  "queries": 200,
+  "gallery": 529,
+  "metrics": {
+    "resnet": {
+      "Rank-1": 63.0,
+      "Rank-5": 84.0,
+      "Rank-10": 90.5,
+      "Rank-20": 98.0,
+      "mAP": 58.06779316205418,
+      "mINP": 43.653785391560156,
+      "combined": 60.53389658102709
+    },
+    "clip_pretrained": {
+      "Rank-1": 56.99999999999999,
+      "Rank-5": 81.5,
+      "Rank-10": 90.5,
+      "Rank-20": 95.0,
+      "mAP": 54.653255532112645,
+      "mINP": 40.91901018986765,
+      "combined": 55.82662776605631
+    },
+    "clip_finetuned": {
+      "Rank-1": 73.5,
+      "Rank-5": 89.5,
+      "Rank-10": 97.5,
+      "Rank-20": 99.0,
+      "mAP": 69.78991091678407,
+      "mINP": 57.75155697010952,
+      "combined": 71.64495545839203
+    }
+  },
+  "sha256": {
+    "split_metadata/test.parquet": "fe3f1d49a7a23ad767e98d734ea05d6b56939e581c2086273c9ccba889534628",
+    "split_metadata/train.parquet": "7ad2534275e75f602ea25b19eb7c40f72f122db6c7353a078fc70bdc6aca7fbe",
+    "split_metadata/val.parquet": "d9c4e8f72178a0def814cd420d87ba0de50eb4ab5d630604496ce19d392db888",
+    "new_checkpoints/stage1_prompts.pt": "402c08038a4ca1a9179821263fdcda11483559372c779d3848b7d79e5628e513",
+    "new_checkpoints/stage2_last.pt": "94bc21dcf51a857cc4e9679847740d404a2e8e3459afb52a72231afeea086df6"
+  }
+}

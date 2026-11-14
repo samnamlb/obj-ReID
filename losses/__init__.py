@@ -8,7 +8,8 @@ class ContrastiveLoss(nn.Module):
     Symmetric image-to-text and text-to-image cross-entropy loss.
 
     The similarity matrix is (B x B): entry [i, j] = sim(image_i, text_j).
-    Correct matches are on the diagonal.
+    With identity_labels, all same-identity entries are positive targets.
+    Without labels, correct matches are on the diagonal.
 
     Args:
         temperature:    Softmax temperature. Start at 0.07.
@@ -26,6 +27,7 @@ class ContrastiveLoss(nn.Module):
         self,
         image_features: torch.Tensor,
         text_features: torch.Tensor,
+        identity_labels: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -38,12 +40,18 @@ class ContrastiveLoss(nn.Module):
         # Previously this code *multiplied* by temp, making tau=0.07 softer (not sharper),
         # which left the contrastive gradient ~200x too small and stalled prompt-token
         # learning at the log(B) random-guess floor.
-        temp = self.log_temp.exp()
+        temp = self.log_temp.exp().clamp(min=1e-4, max=100)
         logits = (image_features @ text_features.T) / temp    # (B, B)
         labels = torch.arange(logits.shape[0], device=logits.device)
 
-        loss_i2t = F.cross_entropy(logits, labels)
-        loss_t2i = F.cross_entropy(logits.T, labels)
+        if identity_labels is None:
+            loss_i2t = F.cross_entropy(logits, labels)
+            loss_t2i = F.cross_entropy(logits.T, labels)
+        else:
+            positives = (identity_labels[:, None] == identity_labels[None, :]).to(logits.dtype)
+            targets = positives / positives.sum(dim=1, keepdim=True)
+            loss_i2t = -(targets * F.log_softmax(logits, dim=1)).sum(dim=1).mean()
+            loss_t2i = -(targets * F.log_softmax(logits.T, dim=1)).sum(dim=1).mean()
         return (loss_i2t + loss_t2i) / 2.0
 
 
@@ -133,7 +141,7 @@ class TripletLossHardMining(nn.Module):
         triplet = F.relu(hardest_pos - hardest_neg + self.margin)
 
         # Only average over anchors that have at least one valid positive
-        valid = pos_mask.any(dim=1)
+        valid = pos_mask.any(dim=1) & diff_id.any(dim=1)
         if valid.sum() == 0:
             return triplet.sum() * 0.0
         return triplet[valid].mean()
@@ -202,6 +210,7 @@ class StageTwoLoss(nn.Module):
         logits: torch.Tensor,
         all_text_features: torch.Tensor,
         labels: torch.Tensor,
+        alignment_features: torch.Tensor = None,
     ):
         """
         Args:
@@ -216,7 +225,7 @@ class StageTwoLoss(nn.Module):
         """
         l_id = self.id_loss(logits, labels)
         l_tri = self.tri_loss(image_features, labels)
-        l_i2t = self.i2t_loss(image_features, all_text_features, labels)
+        l_i2t = self.i2t_loss(image_features if alignment_features is None else alignment_features, all_text_features, labels)
 
         total = self.lambda_id * l_id + self.lambda_tri * l_tri + self.lambda_i2t * l_i2t
 

@@ -18,118 +18,54 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-def compute_cmc_map(
-    predictions: np.ndarray,
-    query_pids: np.ndarray,
-    gallery_pids: np.ndarray,
-    query_camids: np.ndarray,
-    gallery_camids: np.ndarray,
-    max_rank: int = 50,
-    exclude_same_camera: bool = True,
-) -> Tuple[np.ndarray, float, float]:
-    """Compute CMC curve and mAP following standard ReID evaluation protocol."""
-    num_query = predictions.shape[0]
+from reid_data import split_metadata
 
-    all_cmc = []
-    all_AP = []
-    all_INP = []
-    num_valid_query = 0
 
-    for q_idx in range(num_query):
-        q_pid = query_pids[q_idx]
-        q_camid = query_camids[q_idx]
-
-        # Get gallery items in predicted order
-        order = predictions[q_idx]
-        g_pids = gallery_pids[order]
-        g_camids = gallery_camids[order]
-
+def compute_cmc_map(predictions, query_pids, gallery_pids, query_camids,
+                    gallery_camids, max_rank=50, exclude_same_camera=True,
+                    query_paths=None, gallery_paths=None):
+    """Exact full-gallery metrics; eligible queries with no retrieved hit score zero."""
+    curves, aps, inps = [], [], []
+    for q, order in enumerate(predictions):
+        eligible = np.ones(len(gallery_pids), dtype=bool)
+        if query_paths is not None and gallery_paths is not None:
+            eligible &= np.asarray(gallery_paths) != query_paths[q]
         if exclude_same_camera:
-            keep = ~((g_pids == q_pid) & (g_camids == q_camid))
-        else:
-            keep = np.ones(len(g_pids), dtype=bool)
-
-        g_pids = g_pids[keep]
-        matches = (g_pids == q_pid).astype(np.int32)
-
-        if matches.sum() == 0:
+            eligible &= ~((gallery_pids == query_pids[q]) & (gallery_camids == query_camids[q]))
+        total_relevant = np.sum((gallery_pids == query_pids[q]) & eligible)
+        if total_relevant == 0:
             continue
-
-        num_valid_query += 1
-
-        cmc = matches.cumsum()
-        cmc[cmc > 1] = 1
-        all_cmc.append(cmc[:max_rank])
-
-        num_rel = matches.sum()
-        tmp_cmc = matches.cumsum()
-        precision_at_k = [x / (i + 1.0) for i, x in enumerate(tmp_cmc)]
-        precision_at_k = np.asarray(precision_at_k) * matches
-        AP = precision_at_k.sum() / num_rel
-        all_AP.append(AP)
-
-        pos_idx = np.where(matches == 1)[0]
-        if len(pos_idx) > 0:
-            max_pos_idx = np.max(pos_idx)
-            # Standard mINP (Ye et al., 2021): |G_q| / R^hard_q, where |G_q| is
-            # the number of positives for this query and R^hard_q is the rank
-            # of the hardest (last) correct match. Previously this used the
-            # capped `cmc` array (numerator maxed out at 1), which undercounted
-            # mINP by a factor of num_positives for every multi-positive query.
-            inp = tmp_cmc[max_pos_idx] / (max_pos_idx + 1.0)
-            all_INP.append(inp)
-
-    if num_valid_query == 0:
-        return np.zeros(max_rank), 0.0, 0.0
-
-    all_cmc = np.asarray(all_cmc).astype(np.float32)
-    cmc = all_cmc.sum(axis=0) / num_valid_query
-
-    mAP = np.mean(all_AP)
-    mINP = np.mean(all_INP) if all_INP else 0.0
-
-    return cmc, mAP, mINP
-
-def load_dataset_a_gt(root: str):
-    """Load dataset_a ground truth: test.parquet with dynamic query/gallery split."""
-    df = pd.read_parquet(os.path.join(root, "test.parquet"))
-
-    query_rows = []
-    gallery_rows = []
-
-    for pid, group in df.groupby("identity"):
-        rows = group.to_dict("records")
-        if len(rows) >= 2:
-            query_rows.extend(rows[:2])
-            gallery_rows.extend(rows[2:])
-        else:
-            gallery_rows.extend(rows)
-
-    # Also add query images to gallery (standard ReID protocol)
-    gallery_rows.extend(query_rows)
-
-    query_pids = np.array([r["identity"] for r in query_rows])
-    query_camids = np.array([r["camera_id"] for r in query_rows])
-    gallery_pids = np.array([r["identity"] for r in gallery_rows])
-    gallery_camids = np.array([r["camera_id"] for r in gallery_rows])
-
-    return query_pids, query_camids, gallery_pids, gallery_camids, len(query_rows), len(gallery_rows)
+        order = np.asarray(order, dtype=np.int64)
+        matches = (gallery_pids[order[eligible[order]]] == query_pids[q]).astype(int)
+        cumulative = matches.cumsum()
+        curve = np.minimum(cumulative, 1)
+        padded = np.zeros(max_rank)
+        length = min(len(curve), max_rank)
+        padded[:length] = curve[:length]
+        if length and length < max_rank:
+            padded[length:] = curve[length - 1]
+        curves.append(padded)
+        aps.append(float(((cumulative / np.arange(1, len(matches) + 1)) * matches).sum() / total_relevant))
+        hits = np.flatnonzero(matches)
+        inps.append(float(total_relevant / (hits[-1] + 1)) if len(hits) == total_relevant else 0.0)
+    if not curves:
+        raise ValueError("No evaluable queries: each needs a non-self eligible gallery match")
+    return np.mean(curves, axis=0), float(np.mean(aps)), float(np.mean(inps))
 
 
-def load_dataset_b_gt(root: str):
-    """Load dataset_b ground truth: test.parquet with explicit query/gallery."""
-    df = pd.read_parquet(os.path.join(root, "test.parquet"))
-    query_df = df[df["split"] == "query"]
-    gallery_df = df[df["split"] == "gallery"]
+def _ground_truth(root, name):
+    query, gallery = split_metadata(root, name)
+    return (query.identity.to_numpy(), query.camera_id.to_numpy(),
+            gallery.identity.to_numpy(), gallery.camera_id.to_numpy(), len(query), len(gallery))
 
-    return (
-        query_df["identity"].values,
-        query_df["camera_id"].values,
-        gallery_df["identity"].values,
-        gallery_df["camera_id"].values,
-        len(query_df),
-        len(gallery_df),
-    )
+
+def load_dataset_a_gt(root):
+    return _ground_truth(root, "dataset_a")
+
+
+def load_dataset_b_gt(root):
+    return _ground_truth(root, "dataset_b")
+
 
 def evaluate_dataset(
     prediction_path: str,
@@ -153,29 +89,25 @@ def evaluate_dataset(
     if not required_cols.issubset(pred_df.columns):
         raise ValueError(f"Prediction CSV must have columns: {required_cols}. Got: {set(pred_df.columns)}")
 
-    # Parse ranked indices
-    max_rank = max(k_values) + 10
-    predictions = np.zeros((n_q, min(max_rank, n_g)), dtype=np.int64)
-
-    for _, row in pred_df.iterrows():
-        q_idx = int(row["query_index"])
-        if q_idx >= n_q:
-            continue
-        indices_str = str(row["ranked_gallery_indices"]).strip('"').strip("'")
-        indices = [int(x.strip()) for x in indices_str.split(",") if x.strip()]
-        length = min(len(indices), predictions.shape[1])
-        predictions[q_idx, :length] = indices[:length]
-
-    # Check coverage
-    predicted_queries = set(pred_df["query_index"].astype(int))
-    missing = n_q - len(predicted_queries.intersection(range(n_q)))
-    if missing > 0:
-        print(f"  WARNING: {missing}/{n_q} queries have no prediction")
-
-    # Compute metrics
+    # Full permutations prevent duplicate, missing, or truncated entries inflating metrics.
+    if n_q == 0 or n_g == 0:
+        raise ValueError("Empty query/gallery split")
+    expected = set(range(n_q))
+    if pred_df.query_index.duplicated().any() or set(pred_df.query_index) != expected:
+        raise ValueError("Predictions must contain each query_index exactly once")
+    predictions = []
+    for _, row in pred_df.sort_values("query_index").iterrows():
+        indices = [int(x.strip()) for x in str(row["ranked_gallery_indices"]).split(",") if x.strip()]
+        if len(indices) != n_g or set(indices) != set(range(n_g)):
+            raise ValueError("Each ranking must be a full gallery permutation; regenerate with --top_k 0")
+        predictions.append(indices)
+    predicted_queries, missing = expected, 0
+    query, gallery = split_metadata(dataset_root, dataset_name)
+    max_rank = max(k_values)
     cmc, mAP, mINP = compute_cmc_map(
-        predictions, query_pids, gallery_pids, query_camids, gallery_camids,
+        np.asarray(predictions), query_pids, gallery_pids, query_camids, gallery_camids,
         max_rank=max_rank, exclude_same_camera=exclude_same_camera,
+        query_paths=query.image_path.to_numpy(), gallery_paths=gallery.image_path.to_numpy(),
     )
 
     # Cast to Python float so json.dump can serialize (numpy float32 is not JSON-serializable)
@@ -300,6 +232,8 @@ def main():
                        f"{perf.get('mAP', 0):.2f},{perf.get('mINP', 0):.2f},{perf.get('combined', 0):.2f}\n")
     print(f"Summary saved to: {summary_file}")
 
+    if any("error" in result for result in all_results["datasets"].values()):
+        raise SystemExit(1)
     return all_results
 
 

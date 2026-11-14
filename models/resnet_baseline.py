@@ -10,6 +10,9 @@ Usage:
     python models/resnet_baseline.py --dataset_root ./datasets/dataset_b --dataset_name dataset_b --output predictions/dataset_b.csv
 """
 
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+
 import argparse
 import os
 from pathlib import Path
@@ -70,29 +73,15 @@ def encode_images(model, dataset, batch_size=64, num_workers=4):
     return embeddings[np.argsort(indices)]
 
 
+from reid_data import load_paths, validate_images
+
+
 def load_dataset_a(root):
-    """Load dataset_a: dynamic query/gallery split from test.parquet."""
-    df = pd.read_parquet(os.path.join(root, "test.parquet"))
-
-    query_paths, gallery_paths = [], []
-    for pid, group in df.groupby("identity"):
-        paths = group["image_path"].values.tolist()
-        if len(paths) >= 2:
-            query_paths.extend(paths[:2])
-            gallery_paths.extend(paths[2:])
-        else:
-            gallery_paths.extend(paths)
-    gallery_paths.extend(query_paths)  # standard ReID protocol
-
-    return query_paths, gallery_paths
+    return load_paths(root, "dataset_a")
 
 
 def load_dataset_b(root):
-    """Load dataset_b: explicit query/gallery from test.parquet."""
-    df = pd.read_parquet(os.path.join(root, "test.parquet"))
-    query_df = df[df["split"] == "query"]
-    gallery_df = df[df["split"] == "gallery"]
-    return query_df["image_path"].tolist(), gallery_df["image_path"].tolist()
+    return load_paths(root, "dataset_b")
 
 
 def main():
@@ -103,8 +92,10 @@ def main():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--top_k", type=int, default=50, help="Number of ranked results per query")
+    parser.add_argument("--top_k", type=int, default=0, help="Number of results; 0 = full gallery")
     args = parser.parse_args()
+    if args.top_k < 0 or args.batch_size < 1 or args.num_workers < 0:
+        parser.error("top_k and workers must be nonnegative; batch_size must be positive")
 
     if args.device == "cuda" and not torch.cuda.is_available():
         args.device = "cpu"
@@ -117,6 +108,9 @@ def main():
 
     print(f"Queries: {len(query_paths)}, Gallery: {len(gallery_paths)}")
 
+    validate_images(args.dataset_root, query_paths + gallery_paths)
+    from runtime import resolve_device
+    args.device = resolve_device(args.device)
     model = ResNetEncoder(args.device)
 
     # Encode query and gallery
@@ -129,7 +123,9 @@ def main():
     # Compute rankings
     print("Computing rankings...")
     similarity = np.matmul(query_emb, gallery_emb.T)
-    rankings = np.argsort(-similarity, axis=1)[:, :args.top_k]
+    rankings = np.argsort(-similarity, axis=1)
+    if args.top_k > 0:
+        rankings = rankings[:, :args.top_k]
 
     # Save predictions
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)

@@ -82,3 +82,5 @@ The executed notebook includes an interactively added configuration-update cell 
 ## Limits
 
 This is one seed on a small wildlife subset, with no confidence intervals, Dataset B evaluation, projection-head ablation or external deployment benchmark. The accuracy comparison is within this recorded experiment; it is not the historical 88.88% mAP result or a claim of state-of-the-art performance. Benchmarking used three encoding repeats but only one ranking measurement per model. Additional independent seeds and a larger test set would be needed to establish robustness.
+
+Earlier recovery notes, superseded reports and the original notebook are preserved in [the historical archive](../../archive/README.md).

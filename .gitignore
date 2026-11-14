@@ -39,3 +39,6 @@ output/colab/*.zip
 # Local source/result bundles and generated runtime data
 *.zip
 /runs/
+
+# Small historical archive retained in Git
+!/archive/project_history.zip

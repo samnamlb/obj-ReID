@@ -71,6 +71,12 @@ python -m uv run --locked python scripts/measure_efficiency.py --model clip --da
 
 Use `--device cuda` on a supported GPU. For training and evaluation settings, see the [experiment notes](experiments/dataset_a_run/README.md).
 
+## Data
+
+The wildlife images were obtained through [WildlifeDatasets](https://github.com/WildlifeDatasets/wildlife-datasets), an open-source toolkit that brings together animal re-identification collections. We credit the toolkit authors and the original dataset creators. Images are not redistributed here; each collection retains its own license and terms.
+
+Toolkit citation: Čermák et al., [WildlifeDatasets: An Open-Source Toolkit for Animal Re-Identification](https://openaccess.thecvf.com/content/WACV2024/html/Cermak_WildlifeDatasets_An_Open-Source_Toolkit_for_Animal_Re-Identification_WACV_2024_paper.html), WACV 2024.
+
 ## Team and references
 
 Aleem Azimov, Leslie Boney, Kevin Parris, Tanveer Thethi, and Cole Vazzana.
